@@ -1,10 +1,11 @@
 from copy import deepcopy
+from datetime import date
 from unittest import TestCase, main
 from unittest.mock import patch
 import evaluate
 from data import load_example, validate_rows
 from elo import Parameters, decay_ratings, event_changes, expected, outcome
-from evaluate import Scores, choose_parameters, walk_forward
+from evaluate import Scores, choose_parameters, summarize_events, walk_forward
 
 
 class ModelingAssumptions(TestCase):
@@ -43,6 +44,31 @@ class ModelingAssumptions(TestCase):
         self.assertEqual(scores.summary()['pairwise_accuracy'], 0.5)
         self.assertAlmostEqual(scores.summary()['brier'], 0.04)
 
+    def test_equal_event_weight_differs_from_pair_weight_for_unequal_fields(self):
+        # A two-player event contributes one pair; a four-player event contributes six.
+        small, large, pooled = Scores(), Scores(), Scores()
+        small.add(1, 0.8)
+        pooled.add(1, 0.8)
+        for _ in range(6):
+            large.add(1, 0.4)
+            pooled.add(1, 0.4)
+        result = summarize_events({'elo': [small.summary(), large.summary()]})['elo']
+        self.assertEqual(result['events'], 2)
+        self.assertAlmostEqual(result['log_loss'],
+                               (small.summary()['log_loss'] + large.summary()['log_loss']) / 2)
+        self.assertLess(result['log_loss'], pooled.summary()['log_loss'])
+
+    def test_walk_forward_reports_both_weights_for_unequal_fields(self):
+        small = [dict(row, event_id='synth_small', event_name='Synthetic Small',
+                      event_date=date(2021, 1, 1), season=2021) for row in self.event[:2]]
+        large = [dict(row, event_id='synth_large', event_name='Synthetic Large',
+                      event_date=date(2021, 1, 8), season=2021) for row in self.event]
+        result = walk_forward(small + large, Parameters(), [2021])
+        self.assertEqual(result['elo']['pairs'], 7)
+        self.assertEqual(result['event_weighted']['elo']['events'], 2)
+        self.assertNotAlmostEqual(result['elo']['log_loss'],
+                                  result['event_weighted']['elo']['log_loss'])
+
     def test_season_decay(self):
         self.assertEqual(decay_ratings({'fictional_1': 1700}, 0.25)['fictional_1'], 1650)
 
@@ -63,7 +89,7 @@ class ModelingAssumptions(TestCase):
         original = evaluate.score_event
         def capture(event, pre, previous, scores):
             snapshots.append((event[0]['event_id'], dict(pre)))
-            original(event, pre, previous, scores)
+            return original(event, pre, previous, scores)
         with patch('evaluate.score_event', side_effect=capture):
             walk_forward(rows, Parameters(), range(2015, 2023))
         return snapshots

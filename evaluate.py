@@ -5,6 +5,8 @@ from statistics import mean
 from data import validate_rows
 from elo import Parameters, decay_ratings, event_changes, expected, outcome
 
+MODEL_NAMES = ('elo', 'coin_flip', 'previous_season_finish')
+
 
 class Scores:
     def __init__(self):
@@ -27,21 +29,38 @@ class Scores:
 
 def score_event(rows, pre_ratings, previous_finishes, scores):
     """Evaluate the frozen snapshot before the caller applies this event's deltas."""
+    event_scores = {name: Scores() for name in MODEL_NAMES}
     for a, b in combinations(rows, 2):
         y = outcome(a, b)
-        scores['elo'].add(y, expected(pre_ratings[a['player_id']], pre_ratings[b['player_id']]))
-        scores['coin_flip'].add(y, 0.5)
+        elo_p = expected(pre_ratings[a['player_id']], pre_ratings[b['player_id']])
         fa = previous_finishes.get(a['player_id'])
         fb = previous_finishes.get(b['player_id'])
-        p = 0.5 if fa is None or fb is None or fa == fb else 0.75 if fa < fb else 0.25
-        scores['previous_season_finish'].add(y, p)
+        finish_p = 0.5 if fa is None or fb is None or fa == fb else 0.75 if fa < fb else 0.25
+        for name, p in (('elo', elo_p), ('coin_flip', 0.5), ('previous_season_finish', finish_p)):
+            scores[name].add(y, p)
+            event_scores[name].add(y, p)
+    return {name: score.summary() for name, score in event_scores.items()}
+
+
+def summarize_events(event_summaries):
+    """Give each scored event one vote, regardless of its number of pairs."""
+    return {
+        name: {
+            'log_loss': mean(event['log_loss'] for event in events),
+            'brier': mean(event['brier'] for event in events),
+            'pairwise_accuracy': mean(event['pairwise_accuracy'] for event in events),
+            'events': len(events),
+        }
+        for name, events in event_summaries.items()
+    }
 
 
 def walk_forward(rows, parameters, scored_seasons):
     rows = validate_rows(rows)
     ratings, finishes, previous = {}, {}, {}
     current_season = None
-    scores = {name: Scores() for name in ('elo', 'coin_flip', 'previous_season_finish')}
+    scores = {name: Scores() for name in MODEL_NAMES}
+    event_summaries = {name: [] for name in MODEL_NAMES}
     for _, date_rows in groupby(rows, key=lambda r: r['event_date']):
         batch = list(date_rows)
         season = batch[0]['season']
@@ -56,7 +75,9 @@ def walk_forward(rows, parameters, scored_seasons):
             event = list(event_rows)
             pre = {r['player_id']: ratings.get(r['player_id'], 1500.0) for r in event}
             if season in scored_seasons:
-                score_event(event, pre, previous, scores)
+                event_result = score_event(event, pre, previous, scores)
+                for name in MODEL_NAMES:
+                    event_summaries[name].append(event_result[name])
             pending.append((event, event_changes(event, pre, parameters)))
         # Same-date snapshots are all frozen before any update.
         for event, changes in pending:
@@ -65,7 +86,9 @@ def walk_forward(rows, parameters, scored_seasons):
                 ratings[pid] = ratings.get(pid, 1500.0) + changes[pid]
                 rank = 1 + sum(outcome(other, row) for other in event if other['player_id'] != pid)
                 finishes.setdefault(pid, []).append(rank)
-    return {name: values.summary() for name, values in scores.items()}
+    result = {name: values.summary() for name, values in scores.items()}
+    result['event_weighted'] = summarize_events(event_summaries)
+    return result
 
 
 def choose_parameters(rows):
