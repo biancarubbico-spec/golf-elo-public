@@ -1,0 +1,19 @@
+{
+  "artifact_type": "static aggregate summary of separate private historical study",
+  "reproduced_by_public_example": false,
+  "historical_ratings_end": "2022-06-05",
+  "warm_up_seasons": [2015, 2016],
+  "tuning_seasons": [2017, 2018, 2019, 2020],
+  "validation_seasons": [2021, 2022],
+  "selected_parameters": {"K": 60, "season_decay": 0},
+  "tuning_elo_log_loss": 0.6517,
+  "validation_unordered_pairs": 581732,
+  "validation": {
+    "elo": {"log_loss": 0.6422, "brier_score": 0.2148, "pairwise_accuracy": 0.6265},
+    "coin_flip": {"log_loss": 0.6931},
+    "previous_season_finish": {"log_loss": 0.7231}
+  },
+  "baseline_probability_convention": "fixed 0.75/0.25 for prior-season directional preference; otherwise 0.5",
+  "tie_convention": "fractional outcome 0.5; half-credit accuracy",
+  "note": "No tournament-winner accuracy or financial return was measured. Synthetic demo results differ."
+}
