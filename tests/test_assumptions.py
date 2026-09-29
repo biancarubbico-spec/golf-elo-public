@@ -69,6 +69,17 @@ class ModelingAssumptions(TestCase):
         self.assertNotAlmostEqual(result['elo']['log_loss'],
                                   result['event_weighted']['elo']['log_loss'])
 
+    def test_bundled_validation_events_have_different_field_sizes(self):
+        fields = {season: sum(row['season'] == season for row in self.rows)
+                  for season in (2021, 2022)}
+        self.assertEqual(fields, {2021: 4, 2022: 6})
+        self.assertEqual({season: size * (size - 1) // 2 for season, size in fields.items()},
+                         {2021: 6, 2022: 15})
+        result = walk_forward(self.rows, Parameters(), [2021, 2022])
+        self.assertEqual(result['elo']['pairs'], 21)
+        self.assertNotAlmostEqual(result['elo']['log_loss'],
+                                  result['event_weighted']['elo']['log_loss'])
+
     def test_season_decay(self):
         self.assertEqual(decay_ratings({'fictional_1': 1700}, 0.25)['fictional_1'], 1650)
 
@@ -84,15 +95,45 @@ class ModelingAssumptions(TestCase):
         self.assertEqual(walk_forward(self.rows, Parameters(), [2021, 2022]),
                          walk_forward(list(reversed(self.rows)), Parameters(), [2021, 2022]))
 
-    def capture_snapshots(self, rows):
+    def capture_snapshots(self, rows, parameters=Parameters()):
         snapshots = []
         original = evaluate.score_event
         def capture(event, pre, previous, scores):
             snapshots.append((event[0]['event_id'], dict(pre)))
             return original(event, pre, previous, scores)
         with patch('evaluate.score_event', side_effect=capture):
-            walk_forward(rows, Parameters(), range(2015, 2023))
+            walk_forward(rows, parameters, range(2015, 2023))
         return snapshots
+
+    def capture_event_scores(self, rows):
+        scores = {}
+        original = evaluate.score_event
+        def capture(event, pre, previous, pooled):
+            result = original(event, pre, previous, pooled)
+            scores[event[0]['event_id']] = result
+            return result
+        with patch('evaluate.score_event', side_effect=capture):
+            walk_forward(rows, Parameters(), [2021, 2022])
+        return scores
+
+    def test_changing_one_field_does_not_change_another_event_score(self):
+        original_rows = [row for row in self.rows if row['player_id'] not in ('fictional_5', 'fictional_6')]
+        original_scores = self.capture_event_scores(original_rows)
+        expanded_scores = self.capture_event_scores(self.rows)
+        self.assertEqual(original_scores['synth_2021'], expanded_scores['synth_2021'])
+
+    def test_new_validation_entrants_preserve_existing_predictions_and_parameters(self):
+        original_rows = [row for row in self.rows if row['player_id'] not in ('fictional_5', 'fictional_6')]
+        selected, _ = choose_parameters(self.rows)
+        self.assertEqual(selected, Parameters(K=60, season_decay=0))
+        self.assertEqual(selected, choose_parameters(original_rows)[0])
+        old = dict(self.capture_snapshots(original_rows, selected))
+        new = dict(self.capture_snapshots(self.rows, selected))
+        for event_id in ('synth_2021', 'synth_2022'):
+            for pid in ('fictional_1', 'fictional_2', 'fictional_3', 'fictional_4'):
+                self.assertEqual(old[event_id][pid], new[event_id][pid])
+            self.assertEqual(expected(old[event_id]['fictional_1'], old[event_id]['fictional_2']),
+                             expected(new[event_id]['fictional_1'], new[event_id]['fictional_2']))
 
     def test_current_and_future_results_cannot_change_pre_event_ratings(self):
         baseline = self.capture_snapshots(self.rows)
@@ -113,7 +154,7 @@ class ModelingAssumptions(TestCase):
 
     def test_warmup_updates_but_is_not_scored(self):
         result = walk_forward(self.rows, Parameters(), [2021, 2022])
-        self.assertEqual(result['elo']['pairs'], 12)
+        self.assertEqual(result['elo']['pairs'], 21)
         snapshots = self.capture_snapshots(self.rows)
         self.assertEqual(set(snapshots[0][1].values()), {1500})
         self.assertNotEqual(set(snapshots[1][1].values()), {1500})

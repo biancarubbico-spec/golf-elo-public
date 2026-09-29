@@ -53,7 +53,19 @@ The historical grid searched K in 10, 20, 30, 40, 60 and season decay in 0, 0.15
 
 The previous-season baseline favors the lower mean numerical finish rank from the prior season. It uses fixed 75%/25% confidence for its directional choice and 50% when history is unavailable or equal. That arbitrary confidence affects log loss. Ties have an outcome of 0.5 for all metrics; an exactly 50% prediction receives half-credit for accuracy. Each unordered pair has equal weight, so larger events contribute more comparisons.
 
-The synthetic evaluator also reports an equal-event view: it averages pairwise loss within each event, then averages those event means. Consider a fictional two-player event with mean log loss 0.2 and a four-player event with mean log loss 0.6. The pair-weighted result is `(1 × 0.2 + 6 × 0.6) / 7 = 0.543`; the equal-event result is `(0.2 + 0.6) / 2 = 0.4`. The bundled fixture has four players in every event, so its two views coincide. The historical numbers above remain pair-weighted, and parameter selection still uses pair-weighted tuning log loss.
+### Why Event Weighting Matters
+
+Pair-weighted evaluation answers how the model performs for a randomly selected golfer matchup. Equal-event evaluation answers how the model performs for the average tournament. Reporting both prevents large fields from silently dominating the conclusion.
+
+An event with `n` golfers creates `n × (n - 1) / 2` pair comparisons. The fictional 2021 and 2022 validation events have four and six golfers, contributing six and fifteen pairs. Equal-event evaluation first averages each event's pair scores, then averages the two event scores. These comparisons within a tournament are related, which is why uncertainty in the private historical analysis is estimated by resampling complete tournaments.
+
+| Synthetic Elo validation | Pair-weighted | Equal-event |
+| --- | ---: | ---: |
+| Log loss | 0.4445 | 0.4287 |
+| Brier score | 0.1334 | 0.1262 |
+| Pairwise accuracy | 88.10% | 91.67% |
+
+These are synthetic teaching results, not historical findings. The historical numbers above remain pair-weighted, and parameter selection still uses pair-weighted tuning log loss.
 
 ![Aggregate historical validation calibration](figures/historical_calibration.png)
 
