@@ -8,7 +8,7 @@ def main():
     rows = load_example()
     params, tuning = choose_parameters(rows)
     validation = walk_forward(rows, params, (2021, 2022))
-    print('SYNTHETIC EDUCATIONAL DEMO: these are not the historical results.')
+    print('Synthetic Example Data: these are not the historical results.')
     print(json.dumps({'dataset': 'bundled fictional fixture',
                      'parameters': {'K': params.K, 'season_decay': params.season_decay},
                      'synthetic_tuning': tuning, 'synthetic_validation': validation}, indent=2))
